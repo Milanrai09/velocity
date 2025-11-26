@@ -39,6 +39,12 @@ const ecsClient = new ECSClient({
 
 app.use(express.json())
 
+app.get('/test', async (req, res) => {
+  res.send('hello world');
+});
+
+    
+
 // API Route to Queue Build
 app.post('/project', async (req, res) => {
     const { gitURL, slug } = req.body
