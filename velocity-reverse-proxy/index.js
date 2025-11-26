@@ -22,6 +22,7 @@ app.use((req, res) => {
         ignorePath: false
     });
 });
+app.get("/health", (req, res) => res.send("ok"));
 
 // REWRITE "/" to "/index.html"
 proxy.on('proxyReq', (proxyReq, req) => {
