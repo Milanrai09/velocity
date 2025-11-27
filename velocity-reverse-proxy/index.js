@@ -1,66 +1,67 @@
 const express = require('express');
-const axios = require('axios');
+const httpProxy = require('http-proxy');
 const app = express();
 const PORT = process.env.PORT || 8000;
-const BASE_PATH = 'https://velocity-buildserver.s3.ap-south-1.amazonaws.com/__outputs';
 
-// Health check
+// Create proxy with proper configuration for HTTPS
+const proxy = httpProxy.createProxy({
+    changeOrigin: true,
+    secure: true,
+    followRedirects: true
+});
+
+// Health check BEFORE proxy middleware
 app.get("/health", (req, res) => {
     res.send("ok");
 });
 
-// MAIN PROXY MIDDLEWARE
-app.use(async (req, res) => {
+// Rewrite the request path to include subdomain
+proxy.on('proxyReq', (proxyReq, req) => {
     const hostname = req.hostname;
     const subdomain = hostname.split('.')[0];
-    
-    console.log("Hostname:", req.hostname);
-    console.log("Subdomain:", subdomain);
-    console.log("URL:", req.url);
     
     // Handle root path
     let path = req.url === "/" ? "/index.html" : req.url;
     
-    // Construct the full S3 URL
-    const s3Url = `${BASE_PATH}/${subdomain}${path}`;
+    // Rewrite the path to include subdomain folder
+    const newPath = `/__outputs/${subdomain}${path}`;
+    proxyReq.path = newPath;
     
-    console.log("Fetching from S3:", s3Url);
+    console.log("Hostname:", hostname);
+    console.log("Subdomain:", subdomain);
+    console.log("Original URL:", req.url);
+    console.log("Rewritten path:", newPath);
+    console.log("Full target:", `https://velocity-buildserver.s3.ap-south-1.amazonaws.com${newPath}`);
+});
+
+// Handle proxy response
+proxy.on('proxyRes', (proxyRes, req, res) => {
+    console.log("Response status:", proxyRes.statusCode);
+    console.log("Content-Type:", proxyRes.headers['content-type']);
+});
+
+// ERROR HANDLER
+proxy.on('error', (err, req, res) => {
+    console.error("Proxy Error:", err.message);
+    console.error("Error Code:", err.code);
+    console.error("Stack:", err.stack);
     
-    try {
-        // Fetch from S3
-        const response = await axios.get(s3Url, {
-            responseType: 'arraybuffer',
-            validateStatus: (status) => status < 500 // Accept 404, etc.
-        });
-        
-        // Forward status code
-        res.status(response.status);
-        
-        // Forward relevant headers
-        if (response.headers['content-type']) {
-            res.set('Content-Type', response.headers['content-type']);
-        }
-        if (response.headers['cache-control']) {
-            res.set('Cache-Control', response.headers['cache-control']);
-        }
-        if (response.headers['etag']) {
-            res.set('ETag', response.headers['etag']);
-        }
-        
-        // Send the content
-        res.send(response.data);
-        
-    } catch (error) {
-        console.error("Error fetching from S3:", error.message);
-        
-        if (error.response) {
-            // S3 returned an error
-            res.status(error.response.status).send(`Error: ${error.response.statusText}`);
-        } else {
-            // Network or other error
-            res.status(500).send("Proxy Error: " + error.message);
-        }
+    if (!res.headersSent) {
+        res.status(502).send("Bad Gateway: Unable to reach S3. Error: " + err.message);
     }
 });
 
-app.listen(PORT, () => console.log(`Reverse Proxy Running on ${PORT}`));
+// MAIN PROXY MIDDLEWARE (Catch-all route)
+app.use((req, res) => {
+    // Proxy to S3 base domain only
+    proxy.web(req, res, { 
+        target: 'https://velocity-buildserver.s3.ap-south-1.amazonaws.com',
+        changeOrigin: true,
+        secure: true
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`Reverse Proxy Running on ${PORT}`);
+    console.log(`Health check available at http://localhost:${PORT}/health`);
+});
