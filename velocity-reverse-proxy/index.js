@@ -12,7 +12,8 @@ const proxy = httpProxy.createProxy();
 app.use((req, res) => {
     const hostname = req.hostname;
     const subdomain = hostname.split('.')[0];  // e.g. myapp.domain.com → "myapp"
-
+    console.log("Hostname:", req.hostname);
+    console.log("URL:", req.url);
     const target = `${BASE_PATH}/${subdomain}/`;  // ✔ Ensure trailing slash
 
     proxy.web(req, res, { 
